@@ -11,8 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import logging
-import termcolor
 import time
 import os
 import sys
@@ -23,11 +21,14 @@ from ..computer import (
 import playwright.sync_api
 from playwright.sync_api import sync_playwright
 from typing import Literal, Optional
+import json_logger
 
 # Define a mapping from the user-friendly key names to Playwright's expected key names.
 # Playwright is generally good with case-insensitivity for these, but it's best to be canonical.
 # See: https://playwright.dev/docs/api/class-keyboard#keyboard-press
 # Keys like 'a', 'b', '1', '$' are passed directly.
+logger = json_logger.get_json_logger(__name__)
+
 PLAYWRIGHT_KEY_MAP = {
     "backspace": "Backspace",
     "tab": "Tab",
@@ -102,7 +103,7 @@ class PlaywrightComputer(Computer):
         self._page.goto(new_url)
 
     def __enter__(self):
-        print("Creating session...")
+        logger.info("Creating session")
         self._playwright = sync_playwright().start()
 
         launch_kwargs = {
@@ -141,7 +142,10 @@ class PlaywrightComputer(Computer):
         self._page.goto(self._initial_url)
         self._context.on("page", self._handle_new_page)
 
-        termcolor.cprint("Started local Playwright (Chrome).", color="green", attrs=["bold"])
+        logger.info(
+            "Started local Playwright",
+            extra={"extra_fields": {"browser": "Chrome", "screen_size": self._screen_size, "initial_url": self._initial_url}}
+        )
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):

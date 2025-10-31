@@ -12,10 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import os
-import termcolor
 from ..playwright.playwright import PlaywrightComputer
 import browserbase
 from playwright.sync_api import sync_playwright
+import json_logger
+
+
+logger = json_logger.get_json_logger(__name__)
 
 
 class BrowserbaseComputer(PlaywrightComputer):
@@ -27,7 +30,7 @@ class BrowserbaseComputer(PlaywrightComputer):
         super().__init__(screen_size, initial_url)
 
     def __enter__(self):
-        print("Creating session...")
+        logger.info("Creating session")
 
         self._playwright = sync_playwright().start()
         self._browserbase = browserbase.Browserbase(
@@ -61,10 +64,9 @@ class BrowserbaseComputer(PlaywrightComputer):
 
         self._context.on("page", self._handle_new_page)
 
-        termcolor.cprint(
-            f"Session started at https://browserbase.com/sessions/{self._session.id}",
-            color="green",
-            attrs=["bold"],
+        logger.info(
+            "Session started",
+            extra={"extra_fields": {"session_url": f"https://browserbase.com/sessions/{self._session.id}", "session_id": self._session.id, "screen_size": self._screen_size, "initial_url": self._initial_url}}
         )
         return self
 

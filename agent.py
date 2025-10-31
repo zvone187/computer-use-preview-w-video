@@ -15,7 +15,6 @@ import os
 from typing import Literal, Optional, Union, Any
 from google import genai
 from google.genai import types
-import termcolor
 from google.genai.types import (
     Part,
     GenerateContentConfig,
@@ -25,8 +24,7 @@ from google.genai.types import (
     FinishReason,
 )
 import time
-from rich.console import Console
-from rich.table import Table
+import json_logger
 
 from computers import EnvState, Computer
 
@@ -48,7 +46,7 @@ PREDEFINED_COMPUTER_USE_FUNCTIONS = [
 ]
 
 
-console = Console()
+logger = json_logger.get_json_logger(__name__)
 
 # Built-in Computer Use tools will return "EnvState".
 # Custom provided functions will return "dict".
@@ -205,22 +203,18 @@ class BrowserAgent:
                 )
                 return response  # Return response on success
             except Exception as e:
-                print(e)
+                logger.error("Error generating content", extra={"extra_fields": {"error": str(e), "attempt": attempt + 1}})
                 if attempt < max_retries - 1:
                     delay = base_delay_s * (2**attempt)
-                    message = (
-                        f"Generating content failed on attempt {attempt + 1}. "
-                        f"Retrying in {delay} seconds...\n"
-                    )
-                    termcolor.cprint(
-                        message,
-                        color="yellow",
+                    logger.warning(
+                        "Generating content failed, retrying",
+                        extra={"extra_fields": {"attempt": attempt + 1, "max_retries": max_retries, "retry_delay_seconds": delay}}
                     )
                     time.sleep(delay)
                 else:
-                    termcolor.cprint(
-                        f"Generating content failed after {max_retries} attempts.\n",
-                        color="red",
+                    logger.error(
+                        "Generating content failed after all attempts",
+                        extra={"extra_fields": {"max_retries": max_retries}}
                     )
                     raise
 
@@ -246,23 +240,16 @@ class BrowserAgent:
 
     def run_one_iteration(self) -> Literal["COMPLETE", "CONTINUE"]:
         # Generate a response from the model.
-        if self._verbose:
-            with console.status(
-                "Generating response from Gemini Computer Use...", spinner_style=None
-            ):
-                try:
-                    response = self.get_model_response()
-                except Exception as e:
-                    return "COMPLETE"
-        else:
-            try:
-                response = self.get_model_response()
-            except Exception as e:
-                return "COMPLETE"
+        try:
+            response = self.get_model_response()
+        except Exception as e:
+            return "COMPLETE"
 
         if not response.candidates:
-            print("Response has no candidates!")
-            print(response)
+            logger.error(
+                "Response has no candidates",
+                extra={"extra_fields": {"response": str(response)}}
+            )
             raise ValueError("Empty response")
 
         # Extract the text and function call from the response.
@@ -283,29 +270,24 @@ class BrowserAgent:
             return "CONTINUE"
 
         if not function_calls:
-            print(f"Agent Loop Complete: {reasoning}")
+            logger.info(
+                "Agent Loop Complete",
+                extra={"extra_fields": {"reasoning": reasoning}}
+            )
             self.final_reasoning = reasoning
             return "COMPLETE"
 
-        function_call_strs = []
+        function_calls_data = []
         for function_call in function_calls:
-            # Print the function call and any reasoning.
-            function_call_str = f"Name: {function_call.name}"
+            function_call_data = {"name": function_call.name}
             if function_call.args:
-                function_call_str += f"\nArgs:"
-                for key, value in function_call.args.items():
-                    function_call_str += f"\n  {key}: {value}"
-            function_call_strs.append(function_call_str)
-
-        table = Table(expand=True)
-        table.add_column(
-            "Gemini Computer Use Reasoning", header_style="magenta", ratio=1
+                function_call_data["args"] = function_call.args
+            function_calls_data.append(function_call_data)
+        
+        logger.info(
+            "Model response received",
+            extra={"extra_fields": {"reasoning": reasoning, "function_calls": function_calls_data}}
         )
-        table.add_column("Function Call(s)", header_style="cyan", ratio=1)
-        table.add_row(reasoning, "\n".join(function_call_strs))
-        if self._verbose:
-            console.print(table)
-            print()
 
         function_responses = []
         for function_call in function_calls:
@@ -315,17 +297,15 @@ class BrowserAgent:
             ):
                 decision = self._get_safety_confirmation(safety)
                 if decision == "TERMINATE":
-                    print("Terminating agent loop")
+                    logger.info("Terminating agent loop", extra={"extra_fields": {"reason": "safety_confirmation"}})
                     return "COMPLETE"
                 # Explicitly mark the safety check as acknowledged.
                 extra_fr_fields["safety_acknowledgement"] = "true"
-            if self._verbose:
-                with console.status(
-                    "Sending command to Computer...", spinner_style=None
-                ):
-                    fc_result = self.handle_action(function_call)
-            else:
-                fc_result = self.handle_action(function_call)
+            logger.debug(
+                "Executing function call",
+                extra={"extra_fields": {"function_name": function_call.name, "function_args": function_call.args}}
+            )
+            fc_result = self.handle_action(function_call)
             if isinstance(fc_result, EnvState):
                 function_responses.append(
                     FunctionResponse(
@@ -391,15 +371,17 @@ class BrowserAgent:
     ) -> Literal["CONTINUE", "TERMINATE"]:
         if safety["decision"] != "require_confirmation":
             raise ValueError(f"Unknown safety decision: safety['decision']")
-        termcolor.cprint(
-            "Safety service requires explicit confirmation!",
-            color="yellow",
-            attrs=["bold"],
+        logger.warning(
+            "Safety service requires explicit confirmation",
+            extra={"extra_fields": {"explanation": safety.get("explanation", "")}}
         )
-        print(safety["explanation"])
         decision = ""
         while decision.lower() not in ("y", "n", "ye", "yes", "no"):
             decision = input("Do you wish to proceed? [Yes]/[No]\n")
+        logger.info(
+            "Safety confirmation received",
+            extra={"extra_fields": {"decision": decision}}
+        )
         if decision.lower() in ("n", "no"):
             return "TERMINATE"
         return "CONTINUE"
