@@ -303,6 +303,7 @@ class BrowserAgent:
         )
 
         function_responses = []
+        function_results_data = []
         for function_call in function_calls:
             extra_fr_fields = {}
             if function_call.args and (
@@ -327,6 +328,24 @@ class BrowserAgent:
                     fc_result.url
                 )
                 
+                # Add screenshot info to results data for JSON logging
+                function_results_data.append({
+                    "function_name": function_call.name,
+                    "url": fc_result.url,
+                    "screenshot_path": screenshot_path,
+                    "screenshot_filename": os.path.basename(screenshot_path),
+                })
+                
+                logger.info(
+                    "Function call executed",
+                    extra={"extra_fields": {
+                        "function_name": function_call.name,
+                        "url": fc_result.url,
+                        "screenshot_path": screenshot_path,
+                        "screenshot_filename": os.path.basename(screenshot_path),
+                    }}
+                )
+                
                 function_responses.append(
                     FunctionResponse(
                         name=function_call.name,
@@ -345,9 +364,29 @@ class BrowserAgent:
                     )
                 )
             elif isinstance(fc_result, dict):
+                function_results_data.append({
+                    "function_name": function_call.name,
+                    "result": fc_result,
+                })
+                logger.info(
+                    "Function call executed",
+                    extra={"extra_fields": {
+                        "function_name": function_call.name,
+                        "result": fc_result,
+                    }}
+                )
                 function_responses.append(
                     FunctionResponse(name=function_call.name, response=fc_result)
                 )
+        
+        # Log step completion with all function results including screenshot paths
+        logger.info(
+            "Step completed",
+            extra={"extra_fields": {
+                "iteration": self._iteration_count,
+                "function_results": function_results_data,
+            }}
+        )
 
         self._contents.append(
             Content(
