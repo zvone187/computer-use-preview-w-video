@@ -25,6 +25,7 @@ from google.genai.types import (
 )
 import time
 import json_logger
+from pathlib import Path
 
 from computers import EnvState, Computer
 
@@ -71,6 +72,17 @@ class BrowserAgent:
         self._model_name = model_name
         self._verbose = verbose
         self.final_reasoning = None
+        self._iteration_count = 0
+        self._screenshot_count = 0
+        
+        # Set up screenshot directory
+        self._screenshot_dir = Path(f"screenshots/run_{int(time.time())}")
+        self._screenshot_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(
+            "Screenshot directory created",
+            extra={"extra_fields": {"screenshot_dir": str(self._screenshot_dir)}}
+        )
+        
         self._client = genai.Client(
             api_key=os.environ.get("GEMINI_API_KEY"),
             vertexai=os.environ.get("USE_VERTEXAI", "0").lower() in ["true", "1"],
@@ -239,6 +251,7 @@ class BrowserAgent:
         return ret
 
     def run_one_iteration(self) -> Literal["COMPLETE", "CONTINUE"]:
+        self._iteration_count += 1
         # Generate a response from the model.
         try:
             response = self.get_model_response()
@@ -307,11 +320,19 @@ class BrowserAgent:
             )
             fc_result = self.handle_action(function_call)
             if isinstance(fc_result, EnvState):
+                # Save screenshot to disk
+                screenshot_path = self._save_screenshot(
+                    fc_result.screenshot,
+                    function_call.name,
+                    fc_result.url
+                )
+                
                 function_responses.append(
                     FunctionResponse(
                         name=function_call.name,
                         response={
                             "url": fc_result.url,
+                            "screenshot_path": screenshot_path,
                             **extra_fr_fields,
                         },
                         parts=[
@@ -396,3 +417,22 @@ class BrowserAgent:
 
     def denormalize_y(self, y: int) -> int:
         return int(y / 1000 * self._browser_computer.screen_size()[1])
+    
+    def _save_screenshot(self, screenshot: bytes, action_name: str, url: str) -> str:
+        """Save a screenshot to disk and return the file path."""
+        self._screenshot_count += 1
+        timestamp = int(time.time() * 1000)  # milliseconds for unique filenames
+        # Sanitize action name for filename
+        safe_action_name = action_name.replace("_", "-")
+        filename = f"{self._screenshot_count:04d}_{timestamp}_{safe_action_name}.png"
+        filepath = self._screenshot_dir / filename
+        
+        with open(filepath, "wb") as f:
+            f.write(screenshot)
+        
+        logger.debug(
+            "Screenshot saved",
+            extra={"extra_fields": {"filepath": str(filepath), "action": action_name, "url": url}}
+        )
+        
+        return str(filepath)
