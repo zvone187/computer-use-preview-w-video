@@ -14,6 +14,8 @@
 import time
 import os
 import sys
+import json
+from pathlib import Path
 from ..computer import (
     Computer,
     EnvState,
@@ -149,8 +151,32 @@ class PlaywrightComputer(Computer):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if self._context:
+        video_path = None
+        if self._context and self._page:
+            # Get the video path before closing the context
+            try:
+                video_path = self._page.video.path()
+            except Exception:
+                pass
             self._context.close()
+            
+            # Wait a moment for the video file to be saved and get the absolute path
+            try:
+                if video_path:
+                    time.sleep(0.5)  # Give Playwright time to finish writing the video
+                    video_file = Path(video_path)
+                    if video_file.exists():
+                        video_absolute_path = str(video_file.absolute())
+                        
+                        # Print JSON object with video information
+                        video_info = {
+                            "status": "Video saved successfully",
+                            "video_path": video_absolute_path
+                        }
+                        print(json.dumps(video_info, indent=2))
+            except Exception:
+                pass  # Silently fail if video path cannot be determined
+                    
         try:
             self._browser.close()
         except Exception as e:
